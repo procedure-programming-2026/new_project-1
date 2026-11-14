@@ -1,0 +1,6 @@
+"-specs=/home/vlad-shev/group_project/new_project-1/test_project/build/bootloader/specs/picolibc.specs"
+-Wno-frame-address
+-mlongcalls
+-fno-builtin-memcpy
+-fno-builtin-memset
+-fno-builtin-bzero
