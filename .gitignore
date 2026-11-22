@@ -1,2 +1,13 @@
 build/
 managed_components/
+
+pc/camera
+pc/stream_test
+
+images/*.jpg
+images/*.jpeg
+images/*.png
+images/*.ppm
+
+*.o
+*.log
