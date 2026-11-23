@@ -1,10 +1,10 @@
+
 #include "stream.h"
 
 #include <stdio.h>
 #include <unistd.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
-#include <string.h>
 #include <errno.h>
 
 int stream_open(Stream *stream, int port)
