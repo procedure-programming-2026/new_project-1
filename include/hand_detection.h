@@ -11,6 +11,8 @@ typedef struct {
 
     unsigned char *background;
     unsigned char *mask;
+    unsigned char *temp_mask;
+
     int *queue;
 
     int min_x;

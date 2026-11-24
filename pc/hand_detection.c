@@ -3,7 +3,12 @@
 #include <stdlib.h>
 #include <string.h>
 
+#define MOTION_THRESHOLD 20
+#define MIN_PIXELS 2500
+#define MORPH_RADIUS 2
+
 static int is_skin(int r, int g, int b) {
+
     float cb = 128.0f
         - 0.168736f * r
         - 0.331264f * g
@@ -25,12 +30,172 @@ static int is_skin(int r, int g, int b) {
            cr <= 180.0f;
 }
 
+static void dilate(
+    const unsigned char *source,
+    unsigned char *destination,
+    int width,
+    int height
+) {
+    for (int y = 0; y < height; y++) {
+
+        for (int x = 0; x < width; x++) {
+
+            int value = 0;
+
+            for (int dy = -MORPH_RADIUS;
+                 dy <= MORPH_RADIUS && !value;
+                 dy++) {
+
+                for (int dx = -MORPH_RADIUS;
+                     dx <= MORPH_RADIUS;
+                     dx++) {
+
+                    int nx = x + dx;
+                    int ny = y + dy;
+
+                    if (nx < 0 || nx >= width ||
+                        ny < 0 || ny >= height) {
+                        continue;
+                    }
+
+                    if (source[ny * width + nx]) {
+                        value = 1;
+                        break;
+                    }
+                }
+            }
+
+            destination[y * width + x] = value;
+        }
+    }
+}
+
+static void erode(
+    const unsigned char *source,
+    unsigned char *destination,
+    int width,
+    int height
+) {
+    for (int y = 0; y < height; y++) {
+
+        for (int x = 0; x < width; x++) {
+
+            int value = 1;
+
+            for (int dy = -MORPH_RADIUS;
+                 dy <= MORPH_RADIUS && value;
+                 dy++) {
+
+                for (int dx = -MORPH_RADIUS;
+                     dx <= MORPH_RADIUS;
+                     dx++) {
+
+                    int nx = x + dx;
+                    int ny = y + dy;
+
+                    if (nx < 0 || nx >= width ||
+                        ny < 0 || ny >= height ||
+                        !source[ny * width + nx]) {
+
+                        value = 0;
+                        break;
+                    }
+                }
+            }
+
+            destination[y * width + x] = value;
+        }
+    }
+}
+
+static void morphological_closing(
+    HandDetector *detector
+) {
+    dilate(
+        detector->mask,
+        detector->temp_mask,
+        detector->width,
+        detector->height
+    );
+
+    erode(
+        detector->temp_mask,
+        detector->mask,
+        detector->width,
+        detector->height
+    );
+}
+
+/* Analyze finger-like segments */
+
+static int finger_rows(
+    const unsigned char *mask,
+    int width,
+    int min_x,
+    int min_y,
+    int max_x,
+    int max_y
+) {
+    int w = max_x - min_x + 1;
+    int h = max_y - min_y + 1;
+
+    int min_run = w / 20;
+
+    if (min_run < 3) {
+        min_run = 3;
+    }
+
+    int votes = 0;
+
+    for (int k = 1; k <= 9; k++) {
+
+        int y = min_y + h * k / 20;
+
+        int runs = 0;
+        int previous_end = -1;
+        int x = min_x;
+
+        while (x <= max_x) {
+
+            if (!mask[y * width + x]) {
+                x++;
+                continue;
+            }
+
+            int start = x;
+
+            while (x <= max_x &&
+                   mask[y * width + x]) {
+                x++;
+            }
+
+            if (x - start < min_run) {
+                continue;
+            }
+
+            if (previous_end < 0 ||
+                start - previous_end >= min_run) {
+                runs++;
+            }
+
+            previous_end = x;
+        }
+
+        if (runs >= 3) {
+            votes++;
+        }
+    }
+
+    return votes;
+}
+
 int hand_init(
     HandDetector *detector,
     int width,
     int height
 ) {
-    if (detector == NULL || width <= 0 || height <= 0) {
+    if (detector == NULL ||
+        width <= 0 || height <= 0) {
         return 1;
     }
 
@@ -43,10 +208,12 @@ int hand_init(
 
     detector->background = malloc(pixels * 3);
     detector->mask = calloc(pixels, 1);
+    detector->temp_mask = calloc(pixels, 1);
     detector->queue = malloc(pixels * sizeof(int));
 
     if (detector->background == NULL ||
         detector->mask == NULL ||
+        detector->temp_mask == NULL ||
         detector->queue == NULL) {
 
         hand_free(detector);
@@ -76,6 +243,7 @@ Motion hand_detect(
     detector->max_y = 0;
 
     if (!detector->initialized) {
+
         memcpy(
             detector->background,
             frame,
@@ -89,7 +257,10 @@ Motion hand_detect(
         return result;
     }
 
+    /* Step 1: Create skin and motion mask */
+
     for (int i = 0; i < total; i++) {
+
         int index = i * 3;
 
         int r = frame[index];
@@ -103,8 +274,21 @@ Motion hand_detect(
         ) / 3;
 
         detector->mask[i] =
-            difference > 25 && is_skin(r, g, b);
+            difference > MOTION_THRESHOLD &&
+            is_skin(r, g, b);
     }
+
+    /* Step 2: Repair fragmented mask */
+
+    morphological_closing(detector);
+
+    memset(
+        detector->temp_mask,
+        0,
+        (size_t)total
+    );
+
+    /* Step 3: Find connected components */
 
     float best_score = 0.0f;
 
@@ -165,16 +349,20 @@ Motion hand_detect(
             }
         }
 
+        /* Step 4: Filter components */
+
         int count = tail;
 
-        if (count < 700 || count > total / 3) {
+        if (count < MIN_PIXELS ||
+            count > total / 3) {
             continue;
         }
 
         int box_width = max_x - min_x + 1;
         int box_height = max_y - min_y + 1;
 
-        if (box_width < 25 || box_height < 25) {
+        if (box_width < 35 ||
+            box_height < 35) {
             continue;
         }
 
@@ -182,17 +370,50 @@ Motion hand_detect(
             (float)box_width / box_height;
 
         float density =
-            (float)count / (box_width * box_height);
+            (float)count /
+            (box_width * box_height);
 
         if (ratio < 0.35f || ratio > 2.0f) {
             continue;
         }
 
-        if (density < 0.25f || density > 0.78f) {
+        if (density < 0.25f || density > 0.85f) {
             continue;
         }
 
-        float score = count * (1.0f - density);
+        /* Step 5: Shape analysis */
+
+        for (int j = 0; j < count; j++) {
+
+            detector->temp_mask[
+                detector->queue[j]
+            ] = 1;
+        }
+
+        int votes = finger_rows(
+            detector->temp_mask,
+            width,
+            min_x,
+            min_y,
+            max_x,
+            max_y
+        );
+
+        for (int j = 0; j < count; j++) {
+
+            detector->temp_mask[
+                detector->queue[j]
+            ] = 0;
+        }
+
+        if (votes < 3) {
+            continue;
+        }
+
+        /* Step 6: Select the best candidate */
+
+        float score =
+            count * (1.0f + votes / 9.0f);
 
         if (score > best_score) {
 
@@ -221,6 +442,7 @@ void hand_free(HandDetector *detector) {
 
     free(detector->background);
     free(detector->mask);
+    free(detector->temp_mask);
     free(detector->queue);
 
     *detector = (HandDetector){0};
