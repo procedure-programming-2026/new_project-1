@@ -9,6 +9,22 @@ $receiver = $null
 Write-Host "=== FOTORUKA ===" -ForegroundColor Cyan
 
 try {
+    Write-Host "Getting WSL IP address..." -ForegroundColor Yellow
+
+    $ipOutput = wsl.exe -d $distro -- hostname -I
+
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to get WSL IP address"
+    }
+
+    $wslIp = ($ipOutput.Trim() -split '\s+')[0]
+
+    if (-not $wslIp) {
+        throw "WSL IP address is empty"
+    }
+
+    Write-Host "WSL IP: $wslIp" -ForegroundColor Green
+
     Write-Host "Compiling C program..." -ForegroundColor Yellow
 
     wsl.exe -d $distro -- bash -lc 'cd ~/new_project-1/pc && make stream_test'
@@ -42,7 +58,7 @@ try {
         -i "video=$camera" `
         -pix_fmt rgb24 `
         -f rawvideo `
-        "tcp://127.0.0.1:$port"
+        "tcp://${wslIp}:$port"
 }
 catch {
     Write-Host "ERROR: $_" -ForegroundColor Red
