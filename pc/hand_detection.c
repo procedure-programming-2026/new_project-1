@@ -2,8 +2,9 @@
 #include "hand_detection.h"
 #include <stdlib.h>
 #include <string.h>
+#include <stdio.h>
 
-#define MOTION_THRESHOLD 20
+#define MOTION_THRESHOLD 30
 #define MIN_PIXELS 2500
 #define MORPH_RADIUS 2
 
@@ -139,22 +140,21 @@ static int finger_rows(
     int w = max_x - min_x + 1;
     int h = max_y - min_y + 1;
 
-    int min_run = w / 20;
-
-    if (min_run < 3) {
-        min_run = 3;
+    if (h < (w*65) / 100){
+        return 0;
     }
 
+    int min_run = w / 16;
+    if (min_run < 5) min_run =6;
+    if (min_run > 12) min_run = 14;
+
     int votes = 0;
-
-    for (int k = 1; k <= 9; k++) {
-
+    for (int k=1; k <=12; k++){
         int y = min_y + h * k / 20;
 
         int runs = 0;
         int previous_end = -1;
         int x = min_x;
-
         while (x <= max_x) {
 
             if (!mask[y * width + x]) {
@@ -165,7 +165,7 @@ static int finger_rows(
             int start = x;
 
             while (x <= max_x &&
-                   mask[y * width + x]) {
+                mask[y * width + x]) {
                 x++;
             }
 
@@ -174,14 +174,14 @@ static int finger_rows(
             }
 
             if (previous_end < 0 ||
-                start - previous_end >= min_run) {
+                start - previous_end >= (min_run/2)) {
                 runs++;
             }
 
             previous_end = x;
         }
 
-        if (runs >= 3) {
+        if (runs >= 3 && runs <= 5) {
             votes++;
         }
     }
@@ -220,6 +220,68 @@ int hand_init(
         return 1;
     }
 
+    return 0;
+}
+
+static int likely_head(
+    const unsigned char *frame,
+    const unsigned char *mask,
+    int width,
+    int min_x,
+    int min_y,
+    int max_x,
+    int max_y
+){
+    int w = max_x - min_x+1;
+    int h = max_y- min_y+1;
+    if (w < 40 || h < 50) return 0;
+    //Check center-column solidity in the lower-middle palm zone (55% to 80% range)
+    int cx1 = min_x+(w*35)/100;
+    int cx2 = min_x + (w*65)/100;
+    int cy1 = min_y + (h*55)/100;
+    int cy2 = min_y + (h*80)/100;
+    int center_totl =0;
+    int center_active = 0;
+    for (int y = cy1; y <=cy2; y++){
+        for (int x = cx1; x <=cx2; x++){
+            center_totl++;
+            if (mask[y*width+x]){
+            center_active++;
+            }
+        }
+    }
+    if (center_totl > 0 && (center_active * 100) / center_totl < 35){
+        return 1;
+    }
+
+    int eye_y1 = min_y + (h*28)/100;
+    int eye_y2 = min_y + (h*48)/100;
+    int forehead_y = min_y + (h* 18)/100;
+
+    long forehead_luma = 0;
+    int forehead_count = 0;
+    for (int x = cx1; x <= cx2; x++){
+        int idx = (forehead_y * width + x) *3;
+        forehead_luma += (frame[idx]+2 * frame[idx+1] + frame[idx+2])/4;
+        forehead_count++;
+    }
+    int avg_forehead = forehead_count > 0 ? (int)(forehead_luma/forehead_count) : 128;
+
+    int dark_eye_pixels = 0;
+    int eye_zone_pixels = 0;
+    for (int y = eye_y1; y <=eye_y2; y++){
+        for (int x = min_x+w/5; x<=max_x - w/5; x++){
+            int idx = (y*width +x)*3;
+            int luma = (frame[idx]+2 * frame[idx+1]+frame[idx+2])/4;
+            eye_zone_pixels++;
+            if (luma < avg_forehead - 35){
+                dark_eye_pixels++;
+            }
+        }
+    }
+    if (eye_zone_pixels > 0 && (dark_eye_pixels*100)/eye_zone_pixels > 18){
+        return 1;
+    }
     return 0;
 }
 
@@ -373,11 +435,11 @@ Motion hand_detect(
             (float)count /
             (box_width * box_height);
 
-        if (ratio < 0.35f || ratio > 2.0f) {
+        if (ratio < 0.40f || ratio > 1.6f) {
             continue;
         }
 
-        if (density < 0.25f || density > 0.85f) {
+        if (density < 0.30f || density > 0.68f) {
             continue;
         }
 
@@ -405,8 +467,14 @@ Motion hand_detect(
                 detector->queue[j]
             ] = 0;
         }
-
-        if (votes < 3) {
+        if (votes < 4 && box_width < 220 && box_height < 260){
+            if (likely_head(frame, detector->mask, width, min_x, min_y, max_x, max_y)){
+                continue;
+            }
+        }
+        printf("Candidate | w=%d h=%d density=%.2f vtes=%d\n", box_width, box_height, density, votes);
+        int min_votes = (box_width > 200 || box_height > 240) ? 1 : 3;
+        if (votes < min_votes) {
             continue;
         }
 
@@ -430,7 +498,66 @@ Motion hand_detect(
             detector->max_y = max_y;
         }
     }
-
+    
+    for (int i= 0; i< total*3; i++){
+        int bg = detector->background[i];
+        int cur = frame[i];
+        if (bg < cur){
+            detector->background[i] = (unsigned char)((bg + (cur-bg+127)/ 128) );
+        } else if ( bg > cur){
+            detector->background[i] = (unsigned char)((bg - (bg-cur+127)/ 128) );
+        }
+        
+    }
+    
+    static int  valid_streak = 0;
+    if (result.found){
+        valid_streak++;
+        if (valid_streak < 2){
+            result.found = 0;
+        }
+    }else {
+            valid_streak = 0;
+    }
+    static int has_smooth = 0;
+    static int lost_frames = 0;
+    static float s_min_x = 0.0f, s_min_y = 0.0f;
+    static float s_max_x = 0.0f, s_max_y = 0.0f;
+    const float alpha = 0.35f;
+    if (result.found){
+        lost_frames = 0;
+        if (!has_smooth){
+            s_min_x = (float)detector->min_x;
+            s_min_y = (float)detector->min_y;
+            s_max_x = (float)detector->max_x;
+            s_max_y = (float)detector->max_y;
+            has_smooth = 1;
+        }else {
+            s_min_x = alpha * detector->min_x; + (1.0f-alpha) * s_min_x;
+            s_min_y = alpha * detector->min_y + (1.0f-alpha) * s_min_y;
+            s_max_x = alpha * detector->max_x + (1.0f-alpha)* s_max_x;
+            s_max_y = alpha * detector->max_y + (1.0f-alpha)*s_max_y;
+        }
+        detector->min_x = (int)(s_min_x+0.5f);
+        detector->min_y = (int)(s_min_y +0.5f);
+        detector->max_x = (int)(s_max_x +0.5f);
+        detector->max_y = (int)(s_max_y +0.5f);
+        result.x = (detector->min_x + detector->max_x)/2;
+        result.y = (detector->max_y + detector->min_y)/2;
+    }
+    else if (has_smooth && lost_frames < 4){
+        lost_frames++;
+        result.found = 1;
+        detector->min_x = (int)(s_min_x+0.5f);
+        detector->min_y = (int)(s_min_y+0.5f);
+        detector->max_x = (int)(s_max_x+0.5f);
+        detector->max_y = (int)(s_max_y+0.5f);
+        result.x = (detector->min_x+ detector->max_x)/2;
+        result.y = (detector->min_y+detector->max_y)/2;
+    }else{
+        has_smooth = 0;
+        lost_frames = 0;
+    }
     return result;
 }
 
