@@ -1,7 +1,7 @@
 $ErrorActionPreference = "Stop"
 
-$cam1Name = "ACER FHD User Facing"
-$cam2Name = ""   # Залиш порожнім для тестового потоку 1280x720; коли приїде InnoMaker — впиши її назву сюди
+$cam1Name = "ACER HD User Facing"
+$cam2Name = "Logi C270 HD WebCam"   # Залиш порожнім для тестового потоку 1280x720; коли приїде InnoMaker — впиши її назву сюди
 
 $distro = "Ubuntu"
 $cam1Port = 5000
