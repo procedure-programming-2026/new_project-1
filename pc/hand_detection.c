@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+#include <limits.h>
 
 #define MOTION_THRESHOLD 30
 #define MIN_PIXELS 2500
@@ -297,6 +298,11 @@ Motion hand_detect(
 
     int width = detector->width;
     int height = detector->height;
+    if (width <= 0 || height <= 0 || width > INT_MAX / 3 / height) {
+
+    return result;
+
+    }
     int total = width * height;
 
     detector->min_x = 0;
