@@ -7,6 +7,7 @@
 #include "marker_tracking.h"
 #include "hand_detection.h"
 #include "visual_debugger.h"
+#include "serial_comm.h"
 
 #define WIDTH 640
 #define HEIGHT 480
@@ -54,9 +55,9 @@ int main(void) {
     }
 
     MarkerTracker tracker;
-
+    SerialPort serial_port;
     tracker_init(&tracker, 15);
-
+    serial_init(&serial_port, "/dev/ttyUSB0");
     int frame_count = 0;
 
     printf("Visual debugger started\n");
@@ -77,15 +78,20 @@ int main(void) {
             hand_detect(&detector, frame);
 
         Marker target = {
-            hand.found,
-            hand.x,
-            hand.y,
-            hand.pixels
+            .found = hand.found,
+            .x = hand.x,
+            .y = hand.y,
+            .pixels = hand.pixels,
+            .grip = hand.grip
         };
 
         Direction direction =
             tracker_update(&tracker, target);
-
+        static int frame_div = 0;
+        if (++frame_div >= 2){
+            frame_div = 0;
+            serial_send_state(&serial_port, direction, &target);
+        }
         frame_count++;
 
         if (frame_count % 15 == 0) {

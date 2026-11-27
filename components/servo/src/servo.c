@@ -65,7 +65,6 @@ void set_servo_angle(uint8_t channel, float angle){
 void move_all_servos(float rot_angles[SERVOS_NUMBER]){
     for (uint8_t ch=0; ch < SERVOS_NUMBER; ch++){
         set_servo_angle(ch, rot_angles[ch]);
-        if (ch == 4) set_servo_angle(ch+1, rot_angles[ch+1]);
-        vTaskDelay(pdMS_TO_TICKS(30)); // adds delay to soften current spikes
+        vTaskDelay(pdMS_TO_TICKS(20)); // adds delay to soften current spikes
     }
 }

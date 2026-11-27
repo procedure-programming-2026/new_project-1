@@ -1,3 +1,4 @@
 idf_component_register(SRCS "main.c"
-                       REQUIRES "servo" "driver"
+                        INCLUDE_DIRS "."
+                       REQUIRES servo esp_driver_uart esp_driver_gpio
                        )

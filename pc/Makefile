@@ -13,7 +13,9 @@ STREAM_SRC = stream_test.c \
              motion_detection.c \
              skin_detection.c \
              hand_detection.c \
-             visual_debugger.c
+             visual_debugger.c \
+             serial_comm.c 
+
 
 all: camera stream_test
 
