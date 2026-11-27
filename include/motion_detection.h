@@ -7,6 +7,7 @@ typedef struct {
     int x;
     int y;
     int pixels;
+    int grip;
 } Motion;
 
 typedef struct {

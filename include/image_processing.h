@@ -6,6 +6,7 @@ typedef struct {
     int found;
     int x;
     int y;
+    int grip; /* 0 = open palm, 1 = closed palm*/
     int pixels;
 } Marker;
 

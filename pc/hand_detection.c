@@ -353,7 +353,9 @@ Motion hand_detect(
     /* Step 3: Find connected components */
 
     float best_score = 0.0f;
-
+    static int latched_grip = 0;
+    static int prev_found = 0;
+    int best_votes = 0;
     for (int i = 0; i < total; i++) {
 
         if (detector->mask[i] != 1) {
@@ -467,13 +469,13 @@ Motion hand_detect(
                 detector->queue[j]
             ] = 0;
         }
-        if (votes < 4 && box_width < 220 && box_height < 260){
+        if (votes < 4 && box_width < 220 && box_height < 260 && !prev_found && !latched_grip){
             if (likely_head(frame, detector->mask, width, min_x, min_y, max_x, max_y)){
                 continue;
             }
         }
         printf("Candidate | w=%d h=%d density=%.2f vtes=%d\n", box_width, box_height, density, votes);
-        int min_votes = (box_width > 200 || box_height > 240) ? 1 : 3;
+        int min_votes = (prev_found || latched_grip)? 0: ( box_width> 200 || box_height > 240) ? 1 : 3;
         if (votes < min_votes) {
             continue;
         }
@@ -486,7 +488,7 @@ Motion hand_detect(
         if (score > best_score) {
 
             best_score = score;
-
+            best_votes = votes;
             result.found = 1;
             result.x = (int)(sum_x / count);
             result.y = (int)(sum_y / count);
@@ -498,17 +500,24 @@ Motion hand_detect(
             detector->max_y = max_y;
         }
     }
-    
-    for (int i= 0; i< total*3; i++){
-        int bg = detector->background[i];
-        int cur = frame[i];
-        if (bg < cur){
-            detector->background[i] = (unsigned char)((bg + (cur-bg+127)/ 128) );
-        } else if ( bg > cur){
-            detector->background[i] = (unsigned char)((bg - (bg-cur+127)/ 128) );
+    if (result.found){
+        for (int i= 0; i< total*3; i++){
+            int bg = detector->background[i];
+            int cur = frame[i];
+            if (bg < cur){
+                detector->background[i] = (unsigned char)((bg + (cur-bg+127)/ 128) );
+            } else if ( bg > cur){
+                detector->background[i] = (unsigned char)((bg - (bg-cur+127)/ 128) );
+            }
         }
-        
-    }
+        if (best_votes >=3){
+            latched_grip = 0; /*Open palm ->open gripper*/
+        } else if (best_votes <= 1){
+            latched_grip = 1; /*Closed fist -> close & hold object*/
+        }
+        prev_found = result.found;
+        result.grip = latched_grip;
+    }   
     
     static int  valid_streak = 0;
     if (result.found){
@@ -533,7 +542,7 @@ Motion hand_detect(
             s_max_y = (float)detector->max_y;
             has_smooth = 1;
         }else {
-            s_min_x = alpha * detector->min_x; + (1.0f-alpha) * s_min_x;
+            s_min_x = alpha * detector->min_x + (1.0f-alpha) * s_min_x;
             s_min_y = alpha * detector->min_y + (1.0f-alpha) * s_min_y;
             s_max_x = alpha * detector->max_x + (1.0f-alpha)* s_max_x;
             s_max_y = alpha * detector->max_y + (1.0f-alpha)*s_max_y;
